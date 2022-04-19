@@ -1,6 +1,9 @@
 package com.example.backgroundpractice
 
 import android.Manifest
+import android.app.AppOpsManager
+import android.app.usage.UsageStats
+import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -9,13 +12,17 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.Process.myUid
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.backgroundpractice.databinding.ActivityMainBinding
+import com.example.backgroundservice.LaunchListQuery
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,6 +35,9 @@ class MainActivity : AppCompatActivity() {
 
   // Permission Area
   private lateinit var requestPermissionLauncher: ActivityResultLauncher<String>
+
+  // Manager Area
+  private lateinit var usageStatsManager: UsageStatsManager
 
   @RequiresApi(Build.VERSION_CODES.M)
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,21 +82,38 @@ class MainActivity : AppCompatActivity() {
         requestPermission()
       }
       btnCheckPermission.setOnClickListener {
-        checkUsageStatPermission()
+        if (checkUsageStatsPermission()) {
+          Log.d(TAG, "initOnClickListener: Permission Granted")
+        } else {
+          Log.d(TAG, "initOnClickListener: Not Granted")
+          Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+            startActivity(this)
+          }
+        }
+      }
+      btnCheckUsageStats.setOnClickListener {
+        usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
+        val currentTime = System.currentTimeMillis()
+        val dataUsageStats: List<UsageStats> = usageStatsManager.queryUsageStats(
+          UsageStatsManager.INTERVAL_DAILY,
+          currentTime - 3 * 60 * 1000,
+          currentTime
+        )
+        dataUsageStats.forEach {
+          Log.d(TAG, "${it.packageName} _ last time used: ${it.lastTimeUsed}")
+        }
       }
     }
   }
 
-  private fun checkUsageStatPermission() {
-    if (ContextCompat.checkSelfPermission(
-        this@MainActivity,
-        Manifest.permission.PACKAGE_USAGE_STATS
-      ) == PackageManager.PERMISSION_GRANTED
-    ) {
-      Log.d(TAG, "checkUsageStatPermission: Granted")
+  private fun checkUsageStatsPermission(): Boolean {
+    val appOpsManager = getSystemService(APP_OPS_SERVICE) as AppOpsManager
+    val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      appOpsManager.unsafeCheckOpNoThrow("android:get_usage_stats", myUid(), packageName)
     } else {
-      Log.d(TAG, "checkUsageStatPermission: Not Granted")
+      appOpsManager.checkOpNoThrow("android:get_usage_stats", myUid(), packageName)
     }
+    return mode == AppOpsManager.MODE_ALLOWED
   }
 
   @RequiresApi(Build.VERSION_CODES.M)
@@ -104,6 +131,14 @@ class MainActivity : AppCompatActivity() {
       else -> {
         requestPermissionLauncher.launch(Manifest.permission.CAMERA)
       }
+    }
+  }
+
+  override fun onResume() {
+    super.onResume()
+    lifecycleScope.launchWhenResumed {
+      val response = apolloClient.query(LaunchListQuery()).execute()
+      Log.d(TAG, "Success ${response.data}")
     }
   }
 

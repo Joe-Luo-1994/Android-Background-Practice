@@ -13,4 +13,4 @@ dependencyResolutionManagement {
   }
 }
 rootProject.name = "BackgroundPractice"
-include ':app'
+include ("app")
